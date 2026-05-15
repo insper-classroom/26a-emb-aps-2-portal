@@ -24,4 +24,4 @@ Nesse projeto vamos desenvolver um controle para o jogo Portal 2 utilisando a ra
 - Uart via Bluetoth
 
 ## Diagrama
-![diagrama](./diagrama.jpeg)
+![diagrama](./Diagrama.jpeg)

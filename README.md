@@ -4,7 +4,7 @@ Nesse projeto vamos desenvolver um controle para o jogo Portal 2 utilisando a ra
 
 ## Componentes
 - Raspbery-pi pico 2
-- 5 Aotões
+- 5 Botões
 - 1 Analogico
 - 1 Led ring
 - 1 MPU5060

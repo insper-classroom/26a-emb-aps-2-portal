@@ -127,8 +127,8 @@ static void mpu6050_read_raw(int16_t accel[3], int16_t gyro[3], int16_t* temp) {
 
 void btn_callback(uint gpio, uint32_t events) {
     adc_t adc_btn;
-    adc_btn.val = 1;
     if (events == GPIO_IRQ_EDGE_FALL) {
+        adc_btn.val = 1;
         if (gpio == BTN_PIN_B) {
             adc_btn.axis = 3;
         } else if (gpio == BTN_PIN_O) {
@@ -138,6 +138,15 @@ void btn_callback(uint gpio, uint32_t events) {
         }
 
         xQueueSendFromISR(xQueueBtn, &adc_btn, pdFALSE);
+    } else if (events == GPIO_IRQ_EDGE_RISE) {
+        adc_btn.val = 0;
+        if (gpio == BTN_PIN_B) {
+            adc_btn.axis = 3;
+            xQueueSendFromISR(xQueueBtn, &adc_btn, pdFALSE);
+        } else if (gpio == BTN_PIN_O) {
+            adc_btn.axis = 4;
+            xQueueSendFromISR(xQueueBtn, &adc_btn, pdFALSE);
+        }
     }
 }
 

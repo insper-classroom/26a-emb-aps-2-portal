@@ -49,7 +49,6 @@ const int I2C_SDA_GPIO = 4;
 const int I2C_SCL_GPIO = 5;
 
 /* Semaphores */
-SemaphoreHandle_t semaphores[4];
 
 /* Queues */
 QueueHandle_t xQueueBtn;
@@ -314,8 +313,6 @@ int main(void) {
     xTaskCreate(fusion_task, "fusion_task", 1024, NULL, 1, NULL);
     xTaskCreate(analog_task, "analog_task", 1024, NULL, 1, NULL);
     xTaskCreate(uart_task, "uart_task", 256, NULL, 1, NULL);
-
-    xSemaphoreGive(semaphores[0]);
 
     vTaskStartScheduler();
 

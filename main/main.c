@@ -48,8 +48,6 @@ const int MPU_ADDRESS = 0x68;
 const int I2C_SDA_GPIO = 4;
 const int I2C_SCL_GPIO = 5;
 
-/* Semaphores */
-
 /* Queues */
 QueueHandle_t xQueueBtn;
 QueueHandle_t xQueueMPU;

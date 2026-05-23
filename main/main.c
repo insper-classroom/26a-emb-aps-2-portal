@@ -182,7 +182,6 @@ void fusion_task(void* p) {
     FusionAhrsInitialise(&ahrs);
     data_t sensor_data;
     adc_t adc_x, adc_y;
-    rgb_t rgb_data;
     adc_x.axis = 0;
     adc_y.axis = 1;
     int dead_zone = 10;

@@ -58,7 +58,12 @@ def move_mouse(axis, value):
     elif axis == 9:
         if value > 0:
             pyautogui.press('e')
-
+    elif axis == 10:
+        if value > 0:
+            pyautogui.press('space')
+    elif axis == 11:
+        if value > 0:
+            pyautogui.press('ctrl')
 
 def controle(ser):
     """

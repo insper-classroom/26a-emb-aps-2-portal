@@ -10,6 +10,7 @@
 #include "ei_rp2xxx_internal_temperature.h"
 #include "ei_run_impulse.h"
 #include "ei_ultrasonicsensor.h"
+#include "hc06.h"
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
 #include "pins.h"
@@ -41,7 +42,7 @@
 #include "model-parameters/model_metadata.h"
 
 #define SAMPLE_PERIOD (0.01f)
-#define UART_ID uart0
+#define I2C_PORT i2c0
 
 /*
 Protocolo:
@@ -54,6 +55,8 @@ Protocolo:
     7 - s
     8 - d
     9 - e
+    10 - spaço
+    11 - ctrl
 */
 
 typedef struct adc {
@@ -82,16 +85,64 @@ static bool debug_nn = false;
 const int MPU_ADDRESS = 0x68;
 const int I2C_SDA_GPIO = 4;
 const int I2C_SCL_GPIO = 5;
+const int RESET_LED_PIN = 14;
 
 /* Queues */
 QueueHandle_t xQueueBtn;
 QueueHandle_t xQueueMPU;
 QueueHandle_t xQueuePos;
+QueueHandle_t xQueueAnalog;
 
 /* Semaphores */
 SemaphoreHandle_t xSemaphoreReset;
 
 /* Functions */
+void reset_mpu6050() {
+    uint8_t reset_cmd[] = {0x6B, 0x80}; // Registrador 0x6B, Valor 0x80
+    uint8_t wake_cmd[] = {0x6B, 0x00};  // Registrador 0x6B, Valor 0x00
+
+    // Envia o reset
+    i2c_write_blocking(I2C_PORT, MPU_ADDRESS, reset_cmd, 2, false);
+    sleep_ms(100);
+
+    // Tira do modo sleep
+    i2c_write_blocking(I2C_PORT, MPU_ADDRESS, wake_cmd, 2, false);
+    sleep_ms(50);
+}
+
+void init_uart_irq() {
+    // Turn off FIFO's - we want to do this character by character
+    uart_set_fifo_enabled(HC06_UART_ID, false);
+
+    // Set up a RX interrupt
+    // We need to set up the handler first
+    // Select correct interrupt for the UART we are using
+    int UART_IRQ = HC06_UART_ID == uart0 ? UART0_IRQ : UART1_IRQ;
+
+    // And set up and enable the interrupt handlers
+    // irq_set_exclusive_handler(UART_IRQ, uart_rx_handler);
+    irq_set_enabled(UART_IRQ, true);
+
+    // Now enable the UART to send interrupts - RX only
+    uart_set_irq_enables(HC06_UART_ID, true, false);
+}
+
+void init_uart_hc06() {
+    uart_init(HC06_UART_ID, HC06_BAUD_RATE);
+
+    // Set the TX and RX pins by using the function select on the GPIO
+    // Set datasheet for more information on function select
+    gpio_set_function(HC06_TX_PIN, UART_FUNCSEL_NUM(HC06_UART_ID, HC06_TX_PIN));
+    gpio_set_function(HC06_RX_PIN, UART_FUNCSEL_NUM(HC06_UART_ID, HC06_RX_PIN));
+
+    int __unused actual = uart_set_baudrate(HC06_UART_ID, HC06_BAUD_RATE);
+
+    // Set UART flow control CTS/RTS, we don't want these, so turn them off
+    uart_set_hw_flow(HC06_UART_ID, false, false);
+
+    // Set our data format
+    uart_set_format(HC06_UART_ID, 8, 1, UART_PARITY_NONE);
+}
 
 static void uart_clear_rx_fifo(uart_inst_t *uart) {
     while (uart_is_readable(uart)) {
@@ -169,7 +220,11 @@ void btn_callback(uint gpio, uint32_t events) {
         } else if (gpio == BTN_PIN_O) {
             adc_btn.axis = 4;
         } else if (gpio == BTN_PIN_RESET) {
-            adc_btn.axis = 5;
+            xSemaphoreGiveFromISR(xSemaphoreReset, 0);
+        } else if (gpio == BTN_PIN_JUMP) {
+            adc_btn.axis = 10;
+        } else if (gpio == BTN_PIN_CROUCH) {
+            adc_btn.axis = 11;
         }
 
         xQueueSendFromISR(xQueueBtn, &adc_btn, pdFALSE);
@@ -186,6 +241,18 @@ void btn_callback(uint gpio, uint32_t events) {
 }
 
 /* Tasks */
+static void reset_task(void *p) {
+    while (true) {
+        if (xSemaphoreTake(xSemaphoreReset, pdMS_TO_TICKS(10))) {
+            gpio_put(RESET_LED_PIN, 1);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            reset_mpu6050();
+            gpio_put(RESET_LED_PIN, 0);
+            vTaskDelay(pdMS_TO_TICKS(200));
+        }
+    }
+}
+
 static void gesture_recognize_task(void *p) {
     mpu6050_init();
     int16_t accelerometer[3], gyro[3], temp;
@@ -238,14 +305,15 @@ static void gesture_recognize_task(void *p) {
 
             if (strcmp(result.classification[ix].label, "click") == 0 &&
                 result.classification[ix].value > 0.9f) {
-                ei_printf(">>> CLICK DETECTADO! (%.5f)\n",
-                          result.classification[ix].value);
+                // ei_printf(">>> CLICK DETECTADO! (%.5f)\n",
+                //           result.classification[ix].value);
                 // coloca sua lógica aqui
                 adc_t adc_btn;
-                adc_btn.axis = 5;
+                adc_btn.axis = 9;
                 adc_btn.val = 1;
 
                 xQueueSend(xQueueBtn, &adc_btn, pdFALSE);
+                vTaskDelay(pdMS_TO_TICKS(10));
             }
         }
 
@@ -379,26 +447,40 @@ void analog_task(void *p) {
         if (y_media > 30) {
             adc_y.axis = 5;
             adc_y.val = y_media;
-            xQueueSend(xQueueBtn, &adc_y, pdMS_TO_TICKS(10));
+            xQueueSend(xQueueAnalog, &adc_y, pdMS_TO_TICKS(10));
         } else if (y_media < -30) {
             adc_y.axis = 7;
             adc_y.val = y_media;
-            xQueueSend(xQueueBtn, &adc_y, pdMS_TO_TICKS(10));
+            xQueueSend(xQueueAnalog, &adc_y, pdMS_TO_TICKS(10));
         }
-
-        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 
-void uart_task(void *p) {
+void com_task(void *p) {
     adc_t adc_data;
     while (true) {
-        if (xQueueReceive(xQueuePos, &adc_data, pdMS_TO_TICKS(100)) ||
-            xQueueReceive(xQueueBtn, &adc_data, pdMS_TO_TICKS(100))) {
-            uart_putc(UART_ID, adc_data.axis);
-            uart_putc(UART_ID, adc_data.val);
-            uart_putc(UART_ID, adc_data.val >> 8);
-            uart_putc(UART_ID, -1);
+        if (xQueueReceive(xQueuePos, &adc_data, pdMS_TO_TICKS(5))) {
+            uart_putc_raw(HC06_UART_ID, adc_data.axis);
+            uart_putc_raw(HC06_UART_ID, adc_data.val);
+            uart_putc_raw(HC06_UART_ID, adc_data.val >> 8);
+            uart_putc_raw(HC06_UART_ID, -1);
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
+
+        if (xQueueReceive(xQueueBtn, &adc_data, pdMS_TO_TICKS(5))) {
+            uart_putc_raw(HC06_UART_ID, adc_data.axis);
+            uart_putc_raw(HC06_UART_ID, adc_data.val);
+            uart_putc_raw(HC06_UART_ID, adc_data.val >> 8);
+            uart_putc_raw(HC06_UART_ID, -1);
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
+
+        if (xQueueReceive(xQueueAnalog, &adc_data, pdMS_TO_TICKS(5))) {
+            uart_putc_raw(HC06_UART_ID, adc_data.axis);
+            uart_putc_raw(HC06_UART_ID, adc_data.val);
+            uart_putc_raw(HC06_UART_ID, adc_data.val >> 8);
+            uart_putc_raw(HC06_UART_ID, -1);
+            vTaskDelay(pdMS_TO_TICKS(5));
         }
     }
 }
@@ -409,17 +491,61 @@ int main(void) {
     adc_init();
     adc_gpio_init(26);
     adc_gpio_init(27);
+    init_uart_hc06();
+    init_uart_irq();
+
+    gpio_init(RESET_LED_PIN);
+    gpio_set_dir(RESET_LED_PIN, GPIO_OUT);
+
+    gpio_init(BTN_PIN_B);
+    gpio_set_dir(BTN_PIN_B, GPIO_IN);
+    gpio_pull_up(BTN_PIN_B);
+
+    gpio_init(BTN_PIN_O);
+    gpio_set_dir(BTN_PIN_O, GPIO_IN);
+    gpio_pull_up(BTN_PIN_O);
+
+    gpio_init(BTN_PIN_RESET);
+    gpio_set_dir(BTN_PIN_RESET, GPIO_IN);
+    gpio_pull_up(BTN_PIN_RESET);
+
+    gpio_init(BTN_PIN_JUMP);
+    gpio_set_dir(BTN_PIN_JUMP, GPIO_IN);
+    gpio_pull_up(BTN_PIN_JUMP);
+
+    gpio_init(BTN_PIN_CROUCH);
+    gpio_set_dir(BTN_PIN_CROUCH, GPIO_IN);
+    gpio_pull_up(BTN_PIN_CROUCH);
+
+    gpio_set_irq_enabled_with_callback(BTN_PIN_B,
+                                       GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE,
+                                       true, &btn_callback);
+
+    gpio_set_irq_enabled(BTN_PIN_O, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE,
+                         true);
+
+    gpio_set_irq_enabled(BTN_PIN_RESET, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE,
+                         true);
+
+    gpio_set_irq_enabled(BTN_PIN_CROUCH,
+                         GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true);
+
+    gpio_set_irq_enabled(BTN_PIN_JUMP, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE,
+                         true);
 
     xQueueMPU = xQueueCreate(64, sizeof(data_t));
     xQueuePos = xQueueCreate(64, sizeof(adc_t));
     xQueueBtn = xQueueCreate(64, sizeof(adc_t));
+    xQueueAnalog = xQueueCreate(64, sizeof(adc_t));
 
     xSemaphoreReset = xSemaphoreCreateBinary();
 
     xTaskCreate(gesture_recognize_task, "gesture_task 1", 8192, NULL, 1, NULL);
+    xTaskCreate(mpu6050_task, "mpu_task", 8192, NULL, 1, NULL);
     xTaskCreate(fusion_task, "fusion_task", 1024, NULL, 1, NULL);
     xTaskCreate(analog_task, "analog_task", 1024, NULL, 1, NULL);
-    xTaskCreate(uart_task, "uart_task", 256, NULL, 1, NULL);
+    xTaskCreate(com_task, "com_task", 1024, NULL, 1, NULL);
+    xTaskCreate(reset_task, "com_task", 256, NULL, 1, NULL);
     vTaskStartScheduler();
 
     while (true)

@@ -2,11 +2,21 @@
     "cmake.showSystemKits": false,
     "cmake.options.statusBarVisibility": "hidden",
     "cmake.options.advanced": {
-        "build": { "statusBarVisibility": "hidden" },
-        "launch": { "statusBarVisibility": "hidden" },
-        "debug": { "statusBarVisibility": "hidden" },
-        "variant": { "statusBarVisibility": "hidden" },
-        "buildTarget": { "statusBarVisibility": "hidden" }
+        "build": {
+            "statusBarVisibility": "hidden"
+        },
+        "launch": {
+            "statusBarVisibility": "hidden"
+        },
+        "debug": {
+            "statusBarVisibility": "hidden"
+        },
+        "variant": {
+            "statusBarVisibility": "hidden",
+        },
+        "buildTarget": {
+            "statusBarVisibility": "hidden",
+        }
     },
     "cmake.configureOnEdit": false,
     "cmake.automaticReconfigure": false,
@@ -14,18 +24,6 @@
     "cmake.generator": "Ninja",
     "cmake.cmakePath": "${userHome}/.pico-sdk/cmake/v3.31.5/bin/cmake",
     "C_Cpp.debugShortcut": false,
-    "C_Cpp.clang_format_style": "file",
-    "C_Cpp.formatting": "clangFormat",
-    "editor.formatOnType": false,
-    "editor.formatOnSave": false,
-    "[c]": {
-        "editor.formatOnType": false,
-        "editor.formatOnSave": false,
-    },
-    "[cpp]": {
-        "editor.formatOnType": false,
-        "editor.formatOnSave": false,
-    },
     "terminal.integrated.env.windows": {
         "PICO_SDK_PATH": "${env:USERPROFILE}/.pico-sdk/sdk/2.2.0",
         "PICO_TOOLCHAIN_PATH": "${env:USERPROFILE}/.pico-sdk/toolchain/14_2_Rel1",
@@ -44,5 +42,5 @@
     "raspberry-pi-pico.cmakeAutoConfigure": true,
     "raspberry-pi-pico.useCmakeTools": false,
     "raspberry-pi-pico.cmakePath": "${HOME}/.pico-sdk/cmake/v3.31.5/bin/cmake",
-    "raspberry-pi-pico.ninjaPath": "${HOME}/.pico-sdk/ninja/v1.12.1/ninja",
+    "raspberry-pi-pico.ninjaPath": "${HOME}/.pico-sdk/ninja/v1.12.1/ninja"
 }

@@ -87,7 +87,7 @@
 #define EI_CLASSIFIER_PROJECT_ID                 998699
 #define EI_CLASSIFIER_PROJECT_OWNER              "Loress33"
 #define EI_CLASSIFIER_PROJECT_NAME               "Loress33-project-1"
-#define EI_CLASSIFIER_PROJECT_DEPLOY_VERSION     5
+#define EI_CLASSIFIER_PROJECT_DEPLOY_VERSION     6
 #define EI_CLASSIFIER_NN_INPUT_FRAME_SIZE        66
 #define EI_CLASSIFIER_RAW_SAMPLE_COUNT           84
 #define EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME      6
@@ -97,8 +97,8 @@
 #define EI_CLASSIFIER_RESIZE_MODE                EI_CLASSIFIER_RESIZE_NONE
 #define EI_CLASSIFIER_INPUT_FRAMES               0
 #define EI_CLASSIFIER_INTERVAL_MS                11.904761904761905
-#define EI_CLASSIFIER_NN_OUTPUT_COUNT            4
-#define EI_CLASSIFIER_LABEL_COUNT                4
+#define EI_CLASSIFIER_NN_OUTPUT_COUNT            5
+#define EI_CLASSIFIER_LABEL_COUNT                5
 #define EI_CLASSIFIER_SINGLE_FEATURE_INPUT       1
 #define EI_CLASSIFIER_FREQUENCY                  84
 #define EI_CLASSIFIER_SENSOR                     EI_CLASSIFIER_SENSOR_FUSION
@@ -163,6 +163,7 @@
 #define EI_HAS_YOLOV11                              0
 #define EI_HAS_QC_FACE_DET_LITE                     0
 #define EI_HAS_PADDLEOCR_DETECTOR                   0
+#define EI_HAS_QC_YOLOX                             0
 
 #define EI_DSP_PARAMS_SPECTRAL_ANALYSIS_ANALYSIS_TYPE_FFT 1
 
@@ -174,7 +175,7 @@
 
 #define EI_STUDIO_VERSION_MAJOR             1
 #define EI_STUDIO_VERSION_MINOR             93
-#define EI_STUDIO_VERSION_PATCH             4
+#define EI_STUDIO_VERSION_PATCH             6
 
 #if ((EI_CLASSIFIER_INFERENCING_ENGINE == EI_CLASSIFIER_TFLITE) ||      (EI_CLASSIFIER_INFERENCING_ENGINE == EI_CLASSIFIER_DRPAI)) &&      EI_CLASSIFIER_USE_FULL_TFLITE == 1
 

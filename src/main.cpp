@@ -95,6 +95,8 @@ QueueHandle_t xQueueAnalog;
 
 /* Semaphores */
 SemaphoreHandle_t xSemaphoreReset;
+SemaphoreHandle_t xSemaphoreO;
+SemaphoreHandle_t xSemaphoreB;
 
 /* Functions */
 void reset_mpu6050() {
@@ -229,8 +231,10 @@ void btn_callback(uint gpio, uint32_t events) {
 
     if (gpio == BTN_PIN_B) {
         adc_btn.axis = 3;
+        xSemaphoreGiveFromISR(xSemaphoreO,0);
     } else if (gpio == BTN_PIN_O) {
         adc_btn.axis = 4;
+        xSemaphoreGiveFromISR(xSemaphoreO,0);
     } else if (gpio == BTN_PIN_JUMP) {
         adc_btn.axis = 10;
     } else if (gpio == BTN_PIN_CROUCH) {
@@ -514,6 +518,51 @@ void com_task(void *p) {
     }
 }
 
+void rgb_task(void *p){ // task que controla os leds rgb e a vibração
+    gpio_set_function(LED_PIN_R, GPIO_FUNC_PWM);
+    const uint slice_num_r = pwm_gpio_to_slice_num(LED_PIN_R);
+    const uint chan_r = pwm_gpio_to_channel(LED_PIN_R);
+
+    gpio_set_function(LED_PIN_G, GPIO_FUNC_PWM);
+    const uint slice_num_g = pwm_gpio_to_slice_num(LED_PIN_G);
+    const uint chan_g = pwm_gpio_to_channel(LED_PIN_G);
+
+    gpio_set_function(LED_PIN_B, GPIO_FUNC_PWM);
+    const uint slice_num_b = pwm_gpio_to_slice_num(LED_PIN_B);
+    const uint chan_b = pwm_gpio_to_channel(LED_PIN_B);
+
+    pwm_config config = pwm_get_default_config();
+    pwm_config_set_clkdiv(&config, 4.0f);
+    pwm_config_set_wrap(&config, 255);
+
+    pwm_init(slice_num_r, &config, true);
+    pwm_init(slice_num_g, &config, true);
+    pwm_init(slice_num_b, &config, true);
+
+    pwm_set_chan_level(slice_num_r, chan_r, 0);
+    pwm_set_chan_level(slice_num_g, chan_g, 0);
+    pwm_set_chan_level(slice_num_b, chan_b, 0);
+
+    while (1){
+        if (xSemaphoreTake(xSemaphoreB,pdMS_TO_TICKS(5))){
+            pwm_set_chan_level(slice_num_b, chan_b, 255);
+            gpio_put(Feadback_Pin,1);
+            vTaskDelay(pdMS_TO_TICKS(500));
+            gpio_put(Feadback_Pin,0);
+            pwm_set_chan_level(slice_num_b, chan_b, 0);
+        }
+        if (xSemaphoreTake(xSemaphoreO,pdMS_TO_TICKS(5))){
+            pwm_set_chan_level(slice_num_r, chan_r, 255);
+            pwm_set_chan_level(slice_num_g, chan_g, 90);
+            gpio_put(Feadback_Pin,1);
+            vTaskDelay(pdMS_TO_TICKS(500));
+            gpio_put(Feadback_Pin,0);
+            pwm_set_chan_level(slice_num_r, chan_r, 0);
+            pwm_set_chan_level(slice_num_g, chan_g, 0);
+        }
+    }   
+}
+
 int main(void) {
     stdio_init_all();
 
@@ -525,6 +574,9 @@ int main(void) {
 
     gpio_init(RESET_LED_PIN);
     gpio_set_dir(RESET_LED_PIN, GPIO_OUT);
+
+    gpio_init(Feadback_Pin);
+    gpio_set_dir(Feadback_Pin, GPIO_OUT);
 
     gpio_init(BTN_PIN_B);
     gpio_set_dir(BTN_PIN_B, GPIO_IN);
@@ -568,6 +620,8 @@ int main(void) {
     xQueueAnalog = xQueueCreate(64, sizeof(adc_t));
 
     xSemaphoreReset = xSemaphoreCreateBinary();
+    xSemaphoreB = xSemaphoreCreateBinary();
+    xSemaphoreO = xSemaphoreCreateBinary();
 
     xTaskCreate(gesture_recognize_task, "gesture_task 1", 8192, NULL, 1, NULL);
     xTaskCreate(mpu6050_task, "mpu_task", 8192, NULL, 1, NULL);
@@ -575,6 +629,7 @@ int main(void) {
     xTaskCreate(analog_task, "analog_task", 1024, NULL, 1, NULL);
     xTaskCreate(com_task, "com_task", 1024, NULL, 1, NULL);
     xTaskCreate(reset_task, "com_task", 256, NULL, 1, NULL);
+    xTaskCreate(rgb_task,"RGB_task",128, NULL, 1, NULL);
     vTaskStartScheduler();
 
     while (true)

@@ -4,82 +4,84 @@ import sys
 import glob
 import signal
 import threading
-import time
 import serial
 import serial.tools.list_ports
+import pyautogui
+pyautogui.PAUSE = 0  # Remove delay entre ações
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
-import pyautogui
-pyautogui.PAUSE = 0.01
-from pynput.keyboard import Key, Controller as KeyboardController
-from pynput.mouse import Button, Controller as MouseController
 
-keyboard = KeyboardController()
-mouse = MouseController()
 
 # --- Estado global da conexão ---
 _ser = None
 _parar = threading.Event()
-_keys_held = set()
 
-def set_key(key, pressed):
-    if pressed and key not in _keys_held:
-        keyboard.press(key)
-        _keys_held.add(key)
-    elif not pressed and key in _keys_held:
-        keyboard.release(key)
-        _keys_held.discard(key)
 
 def move_mouse(axis, value):
-    pressed = value > 0
-
+    """Move o mouse de acordo com o eixo e valor recebidos."""
+    # Protocolo (ver main.c):
+    # 0 - x (movimento horizontal)
+    # 1 - y (movimento vertical)
+    # 3 - r_click (botão direito)
+    # 4 - l_click (botão esquerdo)
+    # 5 - w, 6 - a, 7 - s, 8 - d, 9 - e (teclas)
     if axis == 0:
         pyautogui.moveRel(value, 0)
     elif axis == 1:
         pyautogui.moveRel(0, value)
+    elif axis == 2:
+        if value > 0:
+            pyautogui.mouseDown(button='left')
+        else:
+            pyautogui.mouseUp(button='left')
     elif axis == 3:
-        if pressed:
-            mouse.click(Button.right)
+        # right click event
+        if value > 0:
+            pyautogui.click(button='right')
     elif axis == 4:
-        if pressed:
-            mouse.click(Button.left)
+        # left click event
+        if value > 0:
+            pyautogui.click(button='left')
     elif axis == 5:
-        set_key('w', pressed)
+        if value > 0:
+            pyautogui.press('w')
     elif axis == 6:
-        set_key('a', pressed)
+        if value > 0:
+            pyautogui.press('a')
     elif axis == 7:
-        set_key('s', pressed)
+        if value > 0:
+            pyautogui.press('s')
     elif axis == 8:
-        set_key('d', pressed)
+        if value > 0:
+            pyautogui.press('d')
     elif axis == 9:
-        if pressed:
-            keyboard.press('e')
-            time.sleep(0.05)
-            keyboard.release('e')
+        if value > 0:
+            pyautogui.press('e')
     elif axis == 10:
-        set_key(Key.space, pressed)
+        if value > 0:
+            pyautogui.press('space')
     elif axis == 11:
-        set_key(Key.ctrl_l, pressed)
-
-
+        if value > 0:
+            pyautogui.press('ctrl')
 
 def controle(ser):
+    """
+    Loop principal que lê bytes da porta serial.
+    Aguarda o byte 0xFF e então lê 3 bytes: axis (1 byte) + valor (2 bytes).
+    Encerra quando _parar for sinalizado.
+    """
     while not _parar.is_set():
-        # Lê 3 bytes de dados primeiro
-        data = ser.read(size=3)
-        if len(data) < 3:
-            continue
-
-        # Depois lê o byte de sync 0xFF
         sync_byte = ser.read(size=1)
-        if not sync_byte or sync_byte[0] != 0xFF:
-            continue  # descarta se não vier o sync esperado
-
-        axis, value = parse_data(data)
-        print(f"axis={axis}, value={value}")
-        move_mouse(axis, value)
-
+        if not sync_byte:
+            continue
+        if sync_byte[0] == 0xFF:
+            data = ser.read(size=3)
+            if len(data) < 3:
+                continue
+            print(data)
+            axis, value = parse_data(data)
+            move_mouse(axis, value)
 
 
 def serial_ports():

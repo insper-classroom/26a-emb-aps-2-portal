@@ -104,12 +104,12 @@ void reset_mpu6050() {
     uint8_t wake_cmd[] = {0x6B, 0x00};  // Registrador 0x6B, Valor 0x00
 
     // Envia o reset
-    i2c_write_blocking(i2c_default, MPU_ADDRESS, reset_cmd, 2, false);
-    vTaskDelay(pdMS_TO_TICKS(200));
+    i2c_write_blocking(I2C_PORT, MPU_ADDRESS, reset_cmd, 2, false);
+    sleep_ms(100);
 
     // Tira do modo sleep
-    i2c_write_blocking(i2c_default, MPU_ADDRESS, wake_cmd, 2, false);
-    vTaskDelay(pdMS_TO_TICKS(200));
+    i2c_write_blocking(I2C_PORT, MPU_ADDRESS, wake_cmd, 2, false);
+    sleep_ms(50);
 }
 
 void init_uart_irq() {
@@ -215,35 +215,31 @@ static void mpu6050_read_raw(int16_t accel[3], int16_t gyro[3], int16_t *temp) {
 
 void btn_callback(uint gpio, uint32_t events) {
     adc_t adc_btn;
-
-    if (gpio == BTN_PIN_RESET && events == GPIO_IRQ_EDGE_FALL) {
-        xSemaphoreGiveFromISR(xSemaphoreReset, 0);
-        return;
-    }
-
     if (events == GPIO_IRQ_EDGE_FALL) {
         adc_btn.val = 1;
+        if (gpio == BTN_PIN_B) {
+            adc_btn.axis = 3;
+        } else if (gpio == BTN_PIN_O) {
+            adc_btn.axis = 4;
+        } else if (gpio == BTN_PIN_RESET) {
+            xSemaphoreGiveFromISR(xSemaphoreReset, 0);
+        } else if (gpio == BTN_PIN_JUMP) {
+            adc_btn.axis = 10;
+        } else if (gpio == BTN_PIN_CROUCH) {
+            adc_btn.axis = 11;
+        }
+
+        xQueueSendFromISR(xQueueBtn, &adc_btn, pdFALSE);
     } else if (events == GPIO_IRQ_EDGE_RISE) {
         adc_btn.val = 0;
-    } else {
-        return;
+        if (gpio == BTN_PIN_B) {
+            adc_btn.axis = 3;
+            xQueueSendFromISR(xQueueBtn, &adc_btn, pdFALSE);
+        } else if (gpio == BTN_PIN_O) {
+            adc_btn.axis = 4;
+            xQueueSendFromISR(xQueueBtn, &adc_btn, pdFALSE);
+        }
     }
-
-    if (gpio == BTN_PIN_B) {
-        adc_btn.axis = 3;
-        xSemaphoreGiveFromISR(xSemaphoreO,0);
-    } else if (gpio == BTN_PIN_O) {
-        adc_btn.axis = 4;
-        xSemaphoreGiveFromISR(xSemaphoreO,0);
-    } else if (gpio == BTN_PIN_JUMP) {
-        adc_btn.axis = 10;
-    } else if (gpio == BTN_PIN_CROUCH) {
-        adc_btn.axis = 11;
-    } else {
-        return;
-    }
-
-    xQueueSendFromISR(xQueueBtn, &adc_btn, pdFALSE);
 }
 
 /* Tasks */
@@ -310,9 +306,9 @@ static void gesture_recognize_task(void *p) {
             //           result.classification[ix].value);
 
             if (strcmp(result.classification[ix].label, "click") == 0 &&
-                result.classification[ix].value > 0.95f) {
-                ei_printf(">>> CLICK DETECTADO! (%.5f)\n",
-                          result.classification[ix].value);
+                result.classification[ix].value > 0.9f) {
+                // ei_printf(">>> CLICK DETECTADO! (%.5f)\n",
+                //           result.classification[ix].value);
                 // coloca sua lógica aqui
                 adc_t adc_btn;
                 adc_btn.axis = 9;
@@ -369,7 +365,7 @@ void fusion_task(void *p) {
     adc_t adc_x, adc_y;
     adc_x.axis = 0;
     adc_y.axis = 1;
-    int dead_zone = 50;
+    int dead_zone = 10;
     float mouse_speed = 0.4;
     int send_counter = 0;
 
@@ -417,75 +413,48 @@ void analog_task(void *p) {
     int y_filter_data[5] = {0};
     int y_filter_index = 0;
 
-    int x_last_axis = -1;
-    int y_last_axis = -1;
-
     while (1) {
-        // ── Eixo X (D/A) ──
         adc_select_input(0);
         int16_t x_output = (adc_read() - 2047) / 8;
         x_filter_data[x_filter_index] = x_output;
         x_filter_index = (x_filter_index + 1) % 5;
 
         int x_sum = 0;
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < 5; i++) {
             x_sum += x_filter_data[i];
+        }
+
         int x_media = x_sum / 5;
-
-        int x_axis_now = -1;
         if (x_media > 30) {
-            x_axis_now = 6; // D
+            adc_x.axis = 8;
+            adc_x.val = x_media;
+            xQueueSend(xQueueBtn, &adc_x, pdMS_TO_TICKS(10));
         } else if (x_media < -30) {
-            x_axis_now = 8; // A
+            adc_x.axis = 6;
+            adc_x.val = x_media;
+            xQueueSend(xQueueBtn, &adc_x, pdMS_TO_TICKS(10));
         }
 
-        if (x_axis_now != x_last_axis) {
-            if (x_last_axis != -1) {
-                adc_x.axis = x_last_axis;
-                adc_x.val = 0;
-                xQueueSend(xQueueBtn, &adc_x, pdMS_TO_TICKS(10));
-            }
-            if (x_axis_now != -1) {
-                adc_x.axis = x_axis_now;
-                adc_x.val = 1;
-                xQueueSend(xQueueBtn, &adc_x, pdMS_TO_TICKS(10));
-            }
-            x_last_axis = x_axis_now;
-        }
-
-        // ── Eixo Y (W/S) ──
         adc_select_input(1);
         int16_t y_output = (adc_read() - 2047) / 8;
         y_filter_data[y_filter_index] = y_output;
         y_filter_index = (y_filter_index + 1) % 5;
 
         int y_sum = 0;
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < 5; i++) {
             y_sum += y_filter_data[i];
+        }
+
         int y_media = y_sum / 5;
-
-        int y_axis_now = -1;
         if (y_media > 30) {
-            y_axis_now = 5; // W
+            adc_y.axis = 5;
+            adc_y.val = y_media;
+            xQueueSend(xQueueAnalog, &adc_y, pdMS_TO_TICKS(10));
         } else if (y_media < -30) {
-            y_axis_now = 7; // S
+            adc_y.axis = 7;
+            adc_y.val = y_media;
+            xQueueSend(xQueueAnalog, &adc_y, pdMS_TO_TICKS(10));
         }
-
-        if (y_axis_now != y_last_axis) {
-            if (y_last_axis != -1) {
-                adc_y.axis = y_last_axis;
-                adc_y.val = 0;
-                xQueueSend(xQueueBtn, &adc_y, pdMS_TO_TICKS(10));
-            }
-            if (y_axis_now != -1) {
-                adc_y.axis = y_axis_now;
-                adc_y.val = 1;
-                xQueueSend(xQueueBtn, &adc_y, pdMS_TO_TICKS(10));
-            }
-            y_last_axis = y_axis_now;
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 

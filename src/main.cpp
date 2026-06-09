@@ -60,12 +60,6 @@ typedef struct data {
     FusionVector accelerometer;
 } data_t;
 
-typedef struct rgb {
-    uint8_t r;
-    uint8_t g;
-    uint8_t b;
-} rgb_t;
-
 using namespace ei;
 
 extern "C" EI_IMPULSE_ERROR

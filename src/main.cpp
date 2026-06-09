@@ -23,7 +23,6 @@
 #include "Fusion.h"
 #include "hc06.h"
 #include "mpu6050.h"
-#include "pins.h"
 
 // Edge Impulse
 #include "edge-impulse-sdk/classifier/ei_model_types.h"
@@ -71,6 +70,17 @@ const int MPU_ADDRESS = 0x68;
 const int I2C_SDA_GPIO = 4;
 const int I2C_SCL_GPIO = 5;
 const int RESET_LED_PIN = 14;
+
+/* Botões */
+const int BTN_PIN_B = 15;
+const int BTN_PIN_O = 16;
+const int BTN_PIN_RESET = 17;
+const int BTN_PIN_CROUCH = 18;
+const int BTN_PIN_JUMP = 13;
+const int LED_PIN_R = 10;
+const int LED_PIN_G = 11;
+const int LED_PIN_B = 12;
+const int Feadback_Pin = 14;
 
 /* Queues */
 QueueHandle_t xQueueBtn;

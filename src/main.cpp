@@ -1,44 +1,35 @@
+// FreeRTOS MUST come first, before any other includes
 #include "FreeRTOS.h"
-#include "Fusion.h"
-#include "ei_accelerometer.h"
-#include "ei_analogsensor.h"
-#include "ei_at_handlers.h"
-#include "ei_classifier_porting.h"
-#include "ei_device_raspberry_rp2xxx.h"
-#include "ei_dht11sensor.h"
-#include "ei_inertialsensor.h"
-#include "ei_rp2xxx_internal_temperature.h"
-#include "ei_run_impulse.h"
-#include "ei_ultrasonicsensor.h"
-#include "hc06.h"
+#include "queue.h"
+#include "semphr.h"
+#include "task.h"
+
+// pico SDK
+#include "hardware/adc.h"
+#include "hardware/gpio.h"
+#include "hardware/i2c.h"
+#include "hardware/irq.h"
+#include "hardware/pwm.h"
+#include "hardware/uart.h"
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
-#include "pins.h"
-#include "task.h"
+
+// std
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 
-// imu
-#include <hardware/adc.h>
-#include <hardware/gpio.h>
-#include <hardware/i2c.h>
-#include <hardware/pwm.h>
-#include <hardware/uart.h>
-#include <pico/stdio.h>
-
-// freertos
-#include <FreeRTOS.h>
-#include <queue.h>
-#include <semphr.h>
-#include <stdlib.h>
-#include <task.h>
-
-// // específico
+// project headers
+#include "Fusion.h"
+#include "hc06.h"
 #include "mpu6050.h"
-// edited
-// -- Adicione estas 3 linhas em main.cpp --
+#include "pins.h"
+
+// Edge Impulse
 #include "edge-impulse-sdk/classifier/ei_model_types.h"
 #include "edge-impulse-sdk/dsp/numpy.hpp"
+#include "ei_classifier_porting.h"
+#include "ei_run_impulse.h"
 #include "model-parameters/model_metadata.h"
 
 #define SAMPLE_PERIOD (0.01f)
@@ -97,19 +88,31 @@ QueueHandle_t xQueueAnalog;
 SemaphoreHandle_t xSemaphoreReset;
 SemaphoreHandle_t xSemaphoreO;
 SemaphoreHandle_t xSemaphoreB;
+SemaphoreHandle_t xSemaphoreAHRS;
 
 /* Functions */
 void reset_mpu6050() {
-    uint8_t reset_cmd[] = {0x6B, 0x80}; // Registrador 0x6B, Valor 0x80
-    uint8_t wake_cmd[] = {0x6B, 0x00};  // Registrador 0x6B, Valor 0x00
+    // Para as tasks que usam o MPU antes de resetar
+    // Acorda o sensor caso esteja em sleep
+    uint8_t wake_cmd[] = {0x6B, 0x00};
+    i2c_write_blocking(i2c_default, MPU_ADDRESS, wake_cmd, 2, false);
+    vTaskDelay(pdMS_TO_TICKS(10));
 
-    // Envia o reset
-    i2c_write_blocking(I2C_PORT, MPU_ADDRESS, reset_cmd, 2, false);
-    sleep_ms(100);
+    // Reset completo
+    uint8_t reset_cmd[] = {0x6B, 0x80};
+    i2c_write_blocking(i2c_default, MPU_ADDRESS, reset_cmd, 2, false);
+    vTaskDelay(pdMS_TO_TICKS(100));  // MPU precisa de ~100ms pós-reset
 
-    // Tira do modo sleep
-    i2c_write_blocking(I2C_PORT, MPU_ADDRESS, wake_cmd, 2, false);
-    sleep_ms(50);
+    // Tira do sleep novamente
+    i2c_write_blocking(i2c_default, MPU_ADDRESS, wake_cmd, 2, false);
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    // Reconfigura gyro (±250°/s) e accel (±2g) explicitamente
+    uint8_t gyro_cfg[] = {0x1B, 0x00};
+    i2c_write_blocking(i2c_default, MPU_ADDRESS, gyro_cfg, 2, false);
+
+    uint8_t accel_cfg[] = {0x1C, 0x00};
+    i2c_write_blocking(i2c_default, MPU_ADDRESS, accel_cfg, 2, false);
 }
 
 void init_uart_irq() {
@@ -238,6 +241,12 @@ void btn_callback(uint gpio, uint32_t events) {
         } else if (gpio == BTN_PIN_O) {
             adc_btn.axis = 4;
             xQueueSendFromISR(xQueueBtn, &adc_btn, pdFALSE);
+        } else if (gpio == BTN_PIN_JUMP) {
+            adc_btn.axis = 10;
+            xQueueSendFromISR(xQueueBtn, &adc_btn, pdFALSE);
+        } else if (gpio == BTN_PIN_CROUCH) {
+            adc_btn.axis = 11;
+            xQueueSendFromISR(xQueueBtn, &adc_btn, pdFALSE);
         }
     }
 }
@@ -247,10 +256,9 @@ static void reset_task(void *p) {
     while (true) {
         if (xSemaphoreTake(xSemaphoreReset, pdMS_TO_TICKS(10))) {
             gpio_put(RESET_LED_PIN, 1);
-            vTaskDelay(pdMS_TO_TICKS(100));
             reset_mpu6050();
+            xSemaphoreGive(xSemaphoreAHRS);  // sinaliza fusion_task
             gpio_put(RESET_LED_PIN, 0);
-            vTaskDelay(pdMS_TO_TICKS(200));
         }
     }
 }
@@ -370,6 +378,10 @@ void fusion_task(void *p) {
     int send_counter = 0;
 
     while (true) {
+        if (xSemaphoreTake(xSemaphoreAHRS, 0)) {  // 0 = não bloqueia
+            FusionAhrsInitialise(&ahrs);
+        }
+
         if (xQueueReceive(xQueueMPU, &sensor_data, pdMS_TO_TICKS(10))) {
             FusionVector gyroscope, accelerometer;
 
@@ -382,21 +394,15 @@ void fusion_task(void *p) {
             const FusionEuler euler =
                 FusionQuaternionToEuler(FusionAhrsGetQuaternion(&ahrs));
 
-            // printf("Roll %0.1f, Pitch %0.1f, Yaw %0.1f\n", euler.angle.roll,
-            // euler.angle.pitch, euler.angle.yaw);
-
             adc_x.val = -angle_to_255(euler.angle.yaw) * mouse_speed;
             adc_y.val = -angle_to_255(euler.angle.roll) * mouse_speed;
 
             send_counter = (send_counter + 1) % 5;
             if (send_counter == 0) {
-                if (adc_x.val > dead_zone || adc_x.val < -dead_zone) {
+                if (adc_x.val > dead_zone || adc_x.val < -dead_zone)
                     xQueueSend(xQueuePos, &adc_x, pdMS_TO_TICKS(10));
-                }
-
-                if (adc_y.val > dead_zone || adc_y.val < -dead_zone) {
+                if (adc_y.val > dead_zone || adc_y.val < -dead_zone)
                     xQueueSend(xQueuePos, &adc_y, pdMS_TO_TICKS(10));
-                }
             }
 
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -413,6 +419,10 @@ void analog_task(void *p) {
     int y_filter_data[5] = {0};
     int y_filter_index = 0;
 
+    int deadzone = 100;
+    bool x_pressed = false;  // rastreia se alguma tecla X está pressionada
+    bool y_pressed = false;
+
     while (1) {
         adc_select_input(0);
         int16_t x_output = (adc_read() - 2047) / 8;
@@ -420,19 +430,24 @@ void analog_task(void *p) {
         x_filter_index = (x_filter_index + 1) % 5;
 
         int x_sum = 0;
-        for (int i = 0; i < 5; i++) {
-            x_sum += x_filter_data[i];
-        }
-
+        for (int i = 0; i < 5; i++) x_sum += x_filter_data[i];
         int x_media = x_sum / 5;
-        if (x_media > 30) {
+
+        if (x_media > deadzone) {
             adc_x.axis = 8;
-            adc_x.val = x_media;
+            adc_x.val = 1;
             xQueueSend(xQueueBtn, &adc_x, pdMS_TO_TICKS(10));
-        } else if (x_media < -30) {
+            x_pressed = true;
+        } else if (x_media < -deadzone) {
             adc_x.axis = 6;
-            adc_x.val = x_media;
+            adc_x.val = 1;
             xQueueSend(xQueueBtn, &adc_x, pdMS_TO_TICKS(10));
+            x_pressed = true;
+        } else if (x_pressed) {
+            // solta a ultima tecla X pressionada mandando val=0
+            adc_x.val = 0;
+            xQueueSend(xQueueBtn, &adc_x, pdMS_TO_TICKS(10));
+            x_pressed = false;
         }
 
         adc_select_input(1);
@@ -441,20 +456,26 @@ void analog_task(void *p) {
         y_filter_index = (y_filter_index + 1) % 5;
 
         int y_sum = 0;
-        for (int i = 0; i < 5; i++) {
-            y_sum += y_filter_data[i];
+        for (int i = 0; i < 5; i++) y_sum += y_filter_data[i];
+        int y_media = y_sum / 5;
+
+        if (y_media > deadzone) {
+            adc_y.axis = 7;
+            adc_y.val = 1;
+            xQueueSend(xQueueAnalog, &adc_y, pdMS_TO_TICKS(10));
+            y_pressed = true;
+        } else if (y_media < -deadzone) {
+            adc_y.axis = 5;
+            adc_y.val = 1;
+            xQueueSend(xQueueAnalog, &adc_y, pdMS_TO_TICKS(10));
+            y_pressed = true;
+        } else if (y_pressed) {
+            adc_y.val = 0;
+            xQueueSend(xQueueAnalog, &adc_y, pdMS_TO_TICKS(10));
+            y_pressed = false;
         }
 
-        int y_media = y_sum / 5;
-        if (y_media > 30) {
-            adc_y.axis = 5;
-            adc_y.val = y_media;
-            xQueueSend(xQueueAnalog, &adc_y, pdMS_TO_TICKS(10));
-        } else if (y_media < -30) {
-            adc_y.axis = 7;
-            adc_y.val = y_media;
-            xQueueSend(xQueueAnalog, &adc_y, pdMS_TO_TICKS(10));
-        }
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -487,7 +508,7 @@ void com_task(void *p) {
     }
 }
 
-void rgb_task(void *p){ // task que controla os leds rgb e a vibração
+void rgb_task(void *p) { // task que controla os leds rgb e a vibração
     gpio_set_function(LED_PIN_R, GPIO_FUNC_PWM);
     const uint slice_num_r = pwm_gpio_to_slice_num(LED_PIN_R);
     const uint chan_r = pwm_gpio_to_channel(LED_PIN_R);
@@ -512,24 +533,24 @@ void rgb_task(void *p){ // task que controla os leds rgb e a vibração
     pwm_set_chan_level(slice_num_g, chan_g, 0);
     pwm_set_chan_level(slice_num_b, chan_b, 0);
 
-    while (1){
-        if (xSemaphoreTake(xSemaphoreB,pdMS_TO_TICKS(5))){
+    while (1) {
+        if (xSemaphoreTake(xSemaphoreB, pdMS_TO_TICKS(5))) {
             pwm_set_chan_level(slice_num_b, chan_b, 255);
-            gpio_put(Feadback_Pin,1);
+            gpio_put(Feadback_Pin, 1);
             vTaskDelay(pdMS_TO_TICKS(500));
-            gpio_put(Feadback_Pin,0);
+            gpio_put(Feadback_Pin, 0);
             pwm_set_chan_level(slice_num_b, chan_b, 0);
         }
-        if (xSemaphoreTake(xSemaphoreO,pdMS_TO_TICKS(5))){
+        if (xSemaphoreTake(xSemaphoreO, pdMS_TO_TICKS(5))) {
             pwm_set_chan_level(slice_num_r, chan_r, 255);
             pwm_set_chan_level(slice_num_g, chan_g, 90);
-            gpio_put(Feadback_Pin,1);
+            gpio_put(Feadback_Pin, 1);
             vTaskDelay(pdMS_TO_TICKS(500));
-            gpio_put(Feadback_Pin,0);
+            gpio_put(Feadback_Pin, 0);
             pwm_set_chan_level(slice_num_r, chan_r, 0);
             pwm_set_chan_level(slice_num_g, chan_g, 0);
         }
-    }   
+    }
 }
 
 int main(void) {
@@ -591,6 +612,8 @@ int main(void) {
     xSemaphoreReset = xSemaphoreCreateBinary();
     xSemaphoreB = xSemaphoreCreateBinary();
     xSemaphoreO = xSemaphoreCreateBinary();
+    xSemaphoreAHRS = xSemaphoreCreateBinary();
+
 
     xTaskCreate(gesture_recognize_task, "gesture_task 1", 8192, NULL, 1, NULL);
     xTaskCreate(mpu6050_task, "mpu_task", 8192, NULL, 1, NULL);
@@ -598,7 +621,7 @@ int main(void) {
     xTaskCreate(analog_task, "analog_task", 1024, NULL, 1, NULL);
     xTaskCreate(com_task, "com_task", 1024, NULL, 1, NULL);
     xTaskCreate(reset_task, "com_task", 256, NULL, 1, NULL);
-    xTaskCreate(rgb_task,"RGB_task",128, NULL, 1, NULL);
+    xTaskCreate(rgb_task, "RGB_task", 128, NULL, 1, NULL);
     vTaskStartScheduler();
 
     while (true)

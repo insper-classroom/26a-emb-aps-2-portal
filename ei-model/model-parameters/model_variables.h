@@ -47,7 +47,7 @@
 #include "edge-impulse-sdk/classifier/inferencing_engines/engines.h"
 #include "edge-impulse-sdk/classifier/postprocessing/ei_postprocessing_common.h"
 
-const char* ei_classifier_inferencing_categories_998699_1[] = { "Wave", "click", "idle", "updown" };
+const char* ei_classifier_inferencing_categories_998699_1[] = { "click", "idle", "idleup", "updown", "wave" };
 
 EI_CLASSIFIER_DSP_AXES_INDEX_TYPE ei_dsp_config_998699_2_axes[] = { 0, 1, 2, 3, 4, 5 };
 const uint32_t ei_dsp_config_998699_2_axes_size = 6;
@@ -172,7 +172,7 @@ const ei_impulse_t impulse_998699_1 = {
     .project_name = "Loress33-project-1",
     .impulse_id = 1,
     .impulse_name = "Impulse #1",
-    .deploy_version = 5,
+    .deploy_version = 7,
 
     .nn_input_frame_size = 66,
     .raw_sample_count = 84,
@@ -203,7 +203,7 @@ const ei_impulse_t impulse_998699_1 = {
     .slices_per_model_window = 4,
 
     .has_anomaly = EI_ANOMALY_TYPE_KMEANS,
-    .label_count = 4,
+    .label_count = 5,
     .categories = ei_classifier_inferencing_categories_998699_1,
     .results_type = EI_CLASSIFIER_TYPE_CLASSIFICATION,
     .freeform_outputs_size = freeform_outputs_998699_1_size,

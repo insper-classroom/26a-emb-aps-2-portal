@@ -9,5 +9,6 @@ const int BTN_PIN_JUMP = 13;
 const int LED_PIN_R = 10;
 const int LED_PIN_G = 11;
 const int LED_PIN_B = 12;
-const int Feadback_Pin = 14
+const int Feadback_Pin = 14;
+
 #endif // PINS_H

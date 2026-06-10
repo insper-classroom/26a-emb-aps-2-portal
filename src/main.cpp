@@ -69,9 +69,8 @@ static bool debug_nn = false;
 const int MPU_ADDRESS = 0x68;
 const int I2C_SDA_GPIO = 4;
 const int I2C_SCL_GPIO = 5;
-const int RESET_LED_PIN = 14;
 
-/* Botões */
+/* Botões e Leds*/
 const int BTN_PIN_B = 15;
 const int BTN_PIN_O = 16;
 const int BTN_PIN_RESET = 17;
@@ -225,8 +224,10 @@ void btn_callback(uint gpio, uint32_t events) {
     if (events == GPIO_IRQ_EDGE_FALL) {
         adc_btn.val = 1;
         if (gpio == BTN_PIN_B) {
+            xSemaphoreGiveFromISR(xSemaphoreB, 0);
             adc_btn.axis = 3;
         } else if (gpio == BTN_PIN_O) {
+            xSemaphoreGiveFromISR(xSemaphoreO, 0);
             adc_btn.axis = 4;
         } else if (gpio == BTN_PIN_RESET) {
             xSemaphoreGiveFromISR(xSemaphoreReset, 0);
@@ -259,10 +260,8 @@ void btn_callback(uint gpio, uint32_t events) {
 static void reset_task(void *p) {
     while (true) {
         if (xSemaphoreTake(xSemaphoreReset, pdMS_TO_TICKS(10))) {
-            gpio_put(RESET_LED_PIN, 1);
             reset_mpu6050();
             xSemaphoreGive(xSemaphoreAHRS);  // sinaliza fusion_task
-            gpio_put(RESET_LED_PIN, 0);
         }
     }
 }
@@ -539,20 +538,20 @@ void rgb_task(void *p) { // task que controla os leds rgb e a vibração
 
     while (1) {
         if (xSemaphoreTake(xSemaphoreB, pdMS_TO_TICKS(5))) {
+            pwm_set_chan_level(slice_num_r, chan_r, 0);
+            pwm_set_chan_level(slice_num_g, chan_g, 0);
             pwm_set_chan_level(slice_num_b, chan_b, 255);
             gpio_put(Feadback_Pin, 1);
-            vTaskDelay(pdMS_TO_TICKS(500));
+            vTaskDelay(pdMS_TO_TICKS(250));
             gpio_put(Feadback_Pin, 0);
-            pwm_set_chan_level(slice_num_b, chan_b, 0);
         }
         if (xSemaphoreTake(xSemaphoreO, pdMS_TO_TICKS(5))) {
             pwm_set_chan_level(slice_num_r, chan_r, 255);
-            pwm_set_chan_level(slice_num_g, chan_g, 90);
+            pwm_set_chan_level(slice_num_g, chan_g, 20);
+            pwm_set_chan_level(slice_num_b, chan_b, 0);
             gpio_put(Feadback_Pin, 1);
-            vTaskDelay(pdMS_TO_TICKS(500));
+            vTaskDelay(pdMS_TO_TICKS(250));
             gpio_put(Feadback_Pin, 0);
-            pwm_set_chan_level(slice_num_r, chan_r, 0);
-            pwm_set_chan_level(slice_num_g, chan_g, 0);
         }
     }
 }
@@ -565,9 +564,6 @@ int main(void) {
     adc_gpio_init(27);
     init_uart_hc06();
     init_uart_irq();
-
-    gpio_init(RESET_LED_PIN);
-    gpio_set_dir(RESET_LED_PIN, GPIO_OUT);
 
     gpio_init(Feadback_Pin);
     gpio_set_dir(Feadback_Pin, GPIO_OUT);

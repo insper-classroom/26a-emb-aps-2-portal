@@ -71,8 +71,8 @@ const int I2C_SDA_GPIO = 4;
 const int I2C_SCL_GPIO = 5;
 
 /* Botões e Leds*/
-const int BTN_PIN_B = 15;
-const int BTN_PIN_O = 16;
+const int BTN_PIN_O = 15;
+const int BTN_PIN_B = 16;
 const int BTN_PIN_RESET = 17;
 const int BTN_PIN_CROUCH = 18;
 const int BTN_PIN_JUMP = 13;
@@ -427,7 +427,7 @@ void analog_task(void *p) {
     bool y_pressed = false;
 
     while (1) {
-        adc_select_input(0);
+        adc_select_input(1);
         int16_t x_output = (adc_read() - 2047) / 8;
         x_filter_data[x_filter_index] = x_output;
         x_filter_index = (x_filter_index + 1) % 5;
@@ -453,7 +453,7 @@ void analog_task(void *p) {
             x_pressed = false;
         }
 
-        adc_select_input(1);
+        adc_select_input(0);
         int16_t y_output = (adc_read() - 2047) / 8;
         y_filter_data[y_filter_index] = y_output;
         y_filter_index = (y_filter_index + 1) % 5;
@@ -563,7 +563,7 @@ int main(void) {
     adc_gpio_init(26);
     adc_gpio_init(27);
     init_uart_hc06();
-    init_uart_irq();
+   // init_uart_irq();
 
     gpio_init(Feadback_Pin);
     gpio_set_dir(Feadback_Pin, GPIO_OUT);
